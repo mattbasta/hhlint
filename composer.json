@@ -1,0 +1,19 @@
+{
+    "name":         "mattbasta/hhlint",
+    "description":  "Hacklang linting tool",
+    "keywords":     ["hack", "hacklang", "hhvm"],
+    "homepage":     "https://github.com/mattbasta/hhlint",
+    "type":         "library",
+    "license":      ["MIT"],
+    "authors":      [
+        {
+            "name":      "Matt Basta",
+            "email":     "mattbasta@gmail.com",
+            "role":      "Developer"
+        }
+    ],
+    "require": {
+        "php":             ">=5.3.0"
+    },
+    "version" :     "1.0.0"
+}
