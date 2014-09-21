@@ -154,7 +154,8 @@ class Lexer
     (_)
 ~xA
 LEX;
-        echo $this->regexp;
+        // '"
+        // The above line fixes syntax highlighting on github.
 
     }
 
