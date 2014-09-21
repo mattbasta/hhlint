@@ -151,7 +151,6 @@ class Token
 
     private static $mapping = array();
 
-
     public $type;
     public $value;
     public $line;
@@ -173,7 +172,7 @@ class Token
     public static function getMapping()
     {
         if (self::$mapping) {
-            return clone self::$mapping;
+            return self::$mapping;
         }
 
         $reflector = new \ReflectionClass('hhlint\\Parsing\\Token');

@@ -194,13 +194,13 @@ LEX;
 
             case ++$x: // /*
                 $comment = $value . $this->getComment();
-                $comment_list[] = array($comment, $start, $this->inner_pos);
+                $this->comment_list[] = array($comment, $start, $this->inner_pos);
                 return $this->getNext();
 
             case ++$x: // //
             case ++$x: // #
                 $comment = $value . $this->getLineComment();
-                $comment_list[] = array($comment, $start, $this->inner_pos);
+                $this->comment_list[] = array($comment, $start, $this->inner_pos);
                 return $this->getNext();
 
             case ++$x: // "string"
@@ -464,39 +464,14 @@ LEX;
                 $lastWasStar = true;
             } else {
                 if ($lastWasStar && $next === '/') {
-                    return $buffer;
+                    break;;
                 }
                 $lastWasStar = false;
             }
 
         }
 
-        $buffer = '';
-
-        while (true) {
-            list($matches, $i, $start, $end) = $this->getMatches($this->regexp_comment);
-
-            $value = $matches[0];
-
-            switch ($i) {
-                case 1: // Line breaks increment line count and are skipped.
-                    $this->line++;
-                    $buffer .= $value;
-                    continue;
-
-                case 2: // */
-                    $buffer .= $value;
-                    return $buffer;;
-
-                case 3: // .
-                    $buffer .= $value;
-
-                case 4: // $
-                    throw new SyntaxError($this->line, 'Unterminated comment');
-
-            }
-
-        }
+        return $buffer;
 
     }
 
@@ -509,19 +484,21 @@ LEX;
 
         while (true) {
             if ($this->inner_pos === strlen($this->data)) {
-                return $buffer;
+                break;
             }
 
             $next = $this->data[$this->inner_pos++];
 
             if ($next === "\n") {
                 $this->line++;
-                return $buffer;
+                break;
             }
 
             $buffer .= $next;
 
         }
+
+        return $buffer;
 
     }
 
@@ -538,16 +515,15 @@ LEX;
             }
 
             $next = $this->data[$this->inner_pos++];
-
             if ($next === '\\') {
-                $peek = $this->data[$this->inner_pos + 1];
+                $peek = $this->data[$this->inner_pos];
                 if ($peek === "'" || $peek === '\\') {
                     $this->inner_pos++;
                     $buffer .= $peek;
                     continue;
                 }
             } else if ($next === "'") {
-                return $buffer;
+                break;
             }
 
             $buffer .= $next;
@@ -557,6 +533,8 @@ LEX;
             }
 
         }
+
+        return $buffer;
 
     }
 
@@ -570,9 +548,9 @@ LEX;
 
         $is_nowdoc = false;
         if ($this->data[$this->inner_pos] === "'") {
-            $this->inner_pos += 2;
             $is_nowdoc = true;
             $result = preg_match('/[A-Z][A-Z0-9_]+/', $this->data, $match, null, $this->inner_pos + 1);
+            $this->inner_pos += 2;
         } else {
             $result = preg_match('/[A-Z][A-Z0-9_]+/', $this->data, $match, null, $this->inner_pos);
         }
@@ -587,7 +565,7 @@ LEX;
         $this->inner_pos += $namelen + 1;
 
         while (true) {
-            if ($this->inner_pos === strlen($this->data)) {
+            if ($this->inner_pos >= strlen($this->data) - 1) {
                 if ($is_nowdoc) {
                     throw new SyntaxError($this->line, 'Unterminated nowdoc');
                 } else {
@@ -598,13 +576,7 @@ LEX;
             $next = $this->data[$this->inner_pos++];
 
             if ($next === '\\') {
-                $peek = $this->data[++$this->inner_pos];
-                $unescaped = $this->getEscape($peek);
-                $buffer .= $unescaped;
-                if ($unescaped === "\n") {
-                    $this->line++;
-                }
-                continue;
+                $next .= $this->data[$this->inner_pos++];
             } elseif ($next === '{') {
                 $next .= $this->eatComplexString();
             } elseif ($next === "\n") {
@@ -621,9 +593,9 @@ LEX;
         }
 
         if ($is_nowdoc) {
-            return new Token(Token::T_NOWDOC, $buffer, $this->line, $start, $end);
+            return new Token(Token::T_NOWDOC, $buffer, $this->line, $start, $this->inner_pos);
         } else {
-            return new Token(Token::T_HEREDOC, $buffer, $this->line, $start, $end);
+            return new Token(Token::T_HEREDOC, $buffer, $this->line, $start, $this->inner_pos);
         }
 
     }
@@ -643,24 +615,20 @@ LEX;
             $next = $this->data[$this->inner_pos++];
 
             if ($next === '\\') {
-                $peek = $this->data[++$this->inner_pos];
-                $unescaped = $this->getEscape($peek);
-                $buffer .= $unescaped;
-                if ($unescaped === "\n") {
-                    $this->line++;
-                }
-                continue;
+                $next .= $this->data[$this->inner_pos++];
             } elseif ($next === '{') {
                 $next .= $this->eatComplexString();
             } elseif ($next === "\n") {
                 $this->line++;
             } elseif ($next === '"') {
-                return $buffer;
+                break;
             }
 
             $buffer .= $next;
 
         }
+
+        return $buffer;
 
     }
 
@@ -682,33 +650,12 @@ LEX;
             } elseif ($token->type === Token::T_RCB) {
                 $braces--;
                 if ($braces === -1) {
-                    return $buffer;
+                    break;
                 }
             }
         }
-    }
 
-    /**
-     * @param string $code The escape code to lookup
-     * @return string
-     */
-    private function getEscape($code)
-    {
-        switch ($code) {
-            case 'n': return "\n";
-            case 'r': return "\r";
-            case 't': return "\t";
-            case 'v': return "\v";
-            case 'e': return "\e";
-            case 'f': return "\f";
-            case '\\': return "\\";
-            case '$': return '$';
-            case '"': return '"';
-        }
-
-        // TODO: Implement unicode escapes
-
-        return '\\' . $code;
+        return $buffer;
     }
 
     /**
@@ -778,7 +725,7 @@ LEX;
                         $this->line++;
                     }
                 }
-                $commentBuffer = substr($commentBuffer, 0, strlen($commentBuffer) - 2);
+                $commentBuffer = \substr($commentBuffer, 0, \strlen($commentBuffer) - 2);
 
                 $queue[] = new Token(
                     Token::T_XHP_COMMENT,
@@ -791,7 +738,7 @@ LEX;
                 continue;
             }
 
-            if ($next->type === Token::T_SLASH && $queue[count($queue) - 2]->type === Token::T_LT) {
+            if ($next->type === Token::T_SLASH && $queue[\count($queue) - 2]->type === Token::T_LT) {
 
                 // Pop off the last two
                 $slash = \array_pop($queue);
@@ -903,6 +850,14 @@ LEX;
         }
         return Token::T_WORD;
 
+    }
+
+    /**
+     * @returns array
+     */
+    public function getComments()
+    {
+        return $this->comment_list;
     }
 
 }
