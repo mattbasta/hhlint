@@ -143,6 +143,10 @@ class Token
     const T_NOWDOC = 134;
 
     const T_ASYNC = 135;
+    const T_AWAIT = 136;
+
+    const T_XHP_NAME = 137;
+    const T_XHP_CLOSING = 138;
 
 
     public $type;

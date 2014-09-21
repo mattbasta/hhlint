@@ -6,9 +6,6 @@ namespace hhlint\Parsing;
 class Lexer
 {
 
-    const STATE_DEFAULT = 0;
-    const STATE_FIXME = 1;
-
     private $data = null;
 
     private $symbols = null;
@@ -20,6 +17,8 @@ class Lexer
     private $inner_pos = 0;
 
     private $comment_list = array();
+
+    private $queue = array();
 
     /**
      * @param {string} $data
@@ -46,7 +45,7 @@ class Lexer
         $varname = $symbols['varname'] = $letter . $alphanumeric . '*';
         $word_part = $symbols['word_part'] = \sprintf("(?:%s%s*)|(?:[a-z](?:%s|-)*%s)", $letter, $alphanumeric, $alphanumeric, $alphanumeric);
         $symbols['word'] = \sprintf("(?:\\\\|%s)+", $word_part);
-        $symbols['xhpname'] = \sprintf("%%?%s(?:%s|:[^:>]|-)*", $letter, $alphanumeric);
+        $symbols['xhpname'] = \sprintf("%%?%s(?:%s|:(?:%s|-)|-)*", $letter, $alphanumeric, $letter);
         $symbols['otag'] = \sprintf("<[a-zA-Z](?:%s|:|-)*", $alphanumeric);
         $symbols['ctag'] = \sprintf("</(?:%s|:|-)+>", $alphanumeric);
         $symbols['lvar'] = '\\$' . $varname;
@@ -98,6 +97,7 @@ class Lexer
     (`) |
     (<\\?php) |
     (<\\?hh) |
+    (<{$symbols['xhpname']}) |
     (\\() |
     (\\)) |
     (;) |
@@ -166,6 +166,10 @@ LEX;
      */
     public function getNext()
     {
+        if ($this->queue) {
+            return array_shift($this->queue);
+        }
+
         if ($this->inner_pos === strlen($this->data)) {
             return null;
         }
@@ -174,242 +178,248 @@ LEX;
 
         $value = $matches[0];
 
+        $x = 0;
+
         switch ($i) {
             // In the case of whitespace, simply skip it and recursively continue.
-            case 1:
+            case ++$x:
                 return $this->getNext();
 
             // Line breaks increment line count and are skipped.
-            case 2:
+            case ++$x:
                 $this->line++;
                 return $this->getNext();
 
-            case 3: // Unsafe expression start
+            case ++$x: // Unsafe expression start
                 return new Token(Token::T_UNSAFE_EXPR, $value, $this->line, $start, $end);
 
-            case 4: // FIXME expression start
+            case ++$x: // FIXME expression start
                 return new Token(Token::T_FIXME_EXPR, $value, $this->line, $start, $end);
 
-            case 5: // /*
+            case ++$x: // /*
                 $comment = $value . $this->getComment();
                 $comment_list[] = array($comment, $start, $this->inner_pos);
                 return $this->getNext();
 
-            case 6: // //
-            case 7: // #
+            case ++$x: // //
+            case ++$x: // #
                 $comment = $value . $this->getLineComment();
                 $comment_list[] = array($comment, $start, $this->inner_pos);
                 return $this->getNext();
 
-            case 8: // "string"
+            case ++$x: // "string"
                 $data = $this->getDoubleQuotedString();
                 return new Token(Token::T_DOUBLE_QUOTED_STRING, $data, $this->line, $start, $end);
 
-            case 9: // 'string'
+            case ++$x: // 'string'
                 $data = $this->getSingleQuotedString();
                 return new Token(Token::T_QUOTED_STRING, $data, $this->line, $start, $this->inner_pos);
 
-            case 10: // <<<HEREDOC ...
+            case ++$x: // <<<HEREDOC ...
                 return $this->getHeredoc($start);
 
-            case 11: // int
+            case ++$x: // int
                 return new Token(Token::T_INT, $value, $this->line, $start, $end);
 
-            case 12: // float
+            case ++$x: // float
                 return new Token(Token::T_FLOAT, $value, $this->line, $start, $end);
 
-            case 13: // @required
+            case ++$x: // @required
                 return new Token(Token::T_REQUIRED, $value, $this->line, $start, $end);
 
-            case 14: // @
+            case ++$x: // @
                 return new Token(Token::T_AT, $value, $this->line, $start, $end);
 
-            case 15: // ? >
+            case ++$x: // ? >
                 return new Token(Token::T_CLOSE_PHP, $value, $this->line, $start, $end);
 
-            case 16:
+            case ++$x:
                 return new Token($this->getWord($value), $value, $this->line, $start, $end);
 
-            case 17:
+            case ++$x:
                 return new Token(Token::T_LVAR, $value, $this->line, $start, $end);
 
-            case 18: // $
+            case ++$x: // $
                 return new Token(Token::T_DOLLAR, $value, $this->line, $start, $end);
 
-            case 19: // `
+            case ++$x: // `
                 return new Token(Token::T_BACKTICK, $value, $this->line, $start, $end);
 
-            case 20: // <?php
+            case ++$x: // <?php
                 return new Token(Token::T_PHP, $value, $this->line, $start, $end);
 
-            case 21: // <?hh
+            case ++$x: // <?hh
                 return new Token(Token::T_HH, $value, $this->line, $start, $end);
 
-            case 22: // (
+            case ++$x: // XHP
+                $this->queueXHP($value, $start);
+                return $this->getNext();
+
+            case ++$x: // (
                 return new Token(Token::T_LP, $value, $this->line, $start, $end);
 
-            case 23: // )
+            case ++$x: // )
                 return new Token(Token::T_RP, $value, $this->line, $start, $end);
 
-            case 24: // ;
+            case ++$x: // ;
                 return new Token(Token::T_SC, $value, $this->line, $start, $end);
 
-            case 25: // ::
+            case ++$x: // ::
                 return new Token(Token::T_COLCOL, $value, $this->line, $start, $end);
 
-            case 26: // :
+            case ++$x: // :
                 return new Token(Token::T_COL, $value, $this->line, $start, $end);
 
-            case 27: // ,
+            case ++$x: // ,
                 return new Token(Token::T_COMMA, $value, $this->line, $start, $end);
 
-            case 28: // ===
+            case ++$x: // ===
                 return new Token(Token::T_EQEQEQ, $value, $this->line, $start, $end);
 
-            case 29: // ==>
+            case ++$x: // ==>
                 return new Token(Token::T_LAMBDA, $value, $this->line, $start, $end);
 
-            case 30: // ==
+            case ++$x: // ==
                 return new Token(Token::T_EQEQ, $value, $this->line, $start, $end);
 
-            case 31: // =>
+            case ++$x: // =>
                 return new Token(Token::T_SARROW, $value, $this->line, $start, $end);
 
-            case 32: // =
+            case ++$x: // =
                 return new Token(Token::T_EQ, $value, $this->line, $start, $end);
 
-            case 33: // !==
+            case ++$x: // !==
                 return new Token(Token::T_DIFF2, $value, $this->line, $start, $end);
 
-            case 34: // !=
+            case ++$x: // !=
                 return new Token(Token::T_DIFF, $value, $this->line, $start, $end);
 
-            case 35: // !
+            case ++$x: // !
                 return new Token(Token::T_EM, $value, $this->line, $start, $end);
 
-            case 36: // |=
+            case ++$x: // |=
                 return new Token(Token::T_BAREQ, $value, $this->line, $start, $end);
 
-            case 37: // +=
+            case ++$x: // +=
                 return new Token(Token::T_PLUSEQ, $value, $this->line, $start, $end);
 
-            case 38: // *=
+            case ++$x: // *=
                 return new Token(Token::T_STAREQ, $value, $this->line, $start, $end);
 
-            case 39: // /=
+            case ++$x: // /=
                 return new Token(Token::T_SLASHEQ, $value, $this->line, $start, $end);
 
-            case 40: // .=
+            case ++$x: // .=
                 return new Token(Token::T_DOTEQ, $value, $this->line, $start, $end);
 
-            case 41: // -=
+            case ++$x: // -=
                 return new Token(Token::T_MINUSEQ, $value, $this->line, $start, $end);
 
-            case 42: // %=
+            case ++$x: // %=
                 return new Token(Token::T_PERCENTEQ, $value, $this->line, $start, $end);
 
-            case 43: // ^=
+            case ++$x: // ^=
                 return new Token(Token::T_XOREQ, $value, $this->line, $start, $end);
 
-            case 44: // &=
+            case ++$x: // &=
                 return new Token(Token::T_AMPEQ, $value, $this->line, $start, $end);
 
-            case 45: // <<=
+            case ++$x: // <<=
                 return new Token(Token::T_LSHIFTEQ, $value, $this->line, $start, $end);
 
-            case 46: // >>=
+            case ++$x: // >>=
                 return new Token(Token::T_RSHIFTEQ, $value, $this->line, $start, $end);
 
-            case 47: // ||
+            case ++$x: // ||
                 return new Token(Token::T_BARBAR, $value, $this->line, $start, $end);
 
-            case 48: // |
+            case ++$x: // |
                 return new Token(Token::T_BAR, $value, $this->line, $start, $end);
 
-            case 49: // &&
+            case ++$x: // &&
                 return new Token(Token::T_AMPAMP, $value, $this->line, $start, $end);
 
-            case 50: // &
+            case ++$x: // &
                 return new Token(Token::T_AMP, $value, $this->line, $start, $end);
 
-            case 51: // ++
+            case ++$x: // ++
                 return new Token(Token::T_INCR, $value, $this->line, $start, $end);
 
-            case 52: // +
+            case ++$x: // +
                 return new Token(Token::T_PLUS, $value, $this->line, $start, $end);
 
-            case 53: // --
+            case ++$x: // --
                 return new Token(Token::T_DECR, $value, $this->line, $start, $end);
 
-            case 54: // ->
+            case ++$x: // ->
                 return new Token(Token::T_ARROW, $value, $this->line, $start, $end);
 
-            case 55: // -
+            case ++$x: // -
                 return new Token(Token::T_MINUS, $value, $this->line, $start, $end);
 
-            case 56: // <<
+            case ++$x: // <<
                 return new Token(Token::T_LTLT, $value, $this->line, $start, $end);
 
-            case 57: // <=
+            case ++$x: // <=
                 return new Token(Token::T_LTE, $value, $this->line, $start, $end);
 
-            case 58: // <
+            case ++$x: // <
                 return new Token(Token::T_LT, $value, $this->line, $start, $end);
 
-            case 59: // >>
+            case ++$x: // >>
                 return new Token(Token::T_GTGT, $value, $this->line, $start, $end);
 
-            case 60: // >=
+            case ++$x: // >=
                 return new Token(Token::T_GTE, $value, $this->line, $start, $end);
 
-            case 61: // >
+            case ++$x: // >
                 return new Token(Token::T_GT, $value, $this->line, $start, $end);
 
-            case 62: // *
+            case ++$x: // *
                 return new Token(Token::T_STAR, $value, $this->line, $start, $end);
 
-            case 63: // /
+            case ++$x: // /
                 return new Token(Token::T_SLASH, $value, $this->line, $start, $end);
 
-            case 64: // ^
+            case ++$x: // ^
                 return new Token(Token::T_XOR, $value, $this->line, $start, $end);
 
-            case 65: // %
+            case ++$x: // %
                 return new Token(Token::T_PERCENT, $value, $this->line, $start, $end);
 
-            case 66: // {
+            case ++$x: // {
                 return new Token(Token::T_LCB, $value, $this->line, $start, $end);
 
-            case 67: // }
+            case ++$x: // }
                 return new Token(Token::T_RCB, $value, $this->line, $start, $end);
 
-            case 68: // [
+            case ++$x: // [
                 return new Token(Token::T_LB, $value, $this->line, $start, $end);
 
-            case 69: // ]
+            case ++$x: // ]
                 return new Token(Token::T_RB, $value, $this->line, $start, $end);
 
-            case 70: // ...
+            case ++$x: // ...
                 return new Token(Token::T_ELLIPSIS, $value, $this->line, $start, $end);
 
-            case 71: // .
+            case ++$x: // .
                 return new Token(Token::T_DOT, $value, $this->line, $start, $end);
 
-            case 72: // ?->
+            case ++$x: // ?->
                 return new Token(Token::T_NSARROW, $value, $this->line, $start, $end);
 
-            case 73: // ?
+            case ++$x: // ?
                 return new Token(Token::T_QM, $value, $this->line, $start, $end);
 
-            case 74: // ~
+            case ++$x: // ~
                 return new Token(Token::T_TILD, $value, $this->line, $start, $end);
 
-            case 75: // _
+            case ++$x: // _
                 return new Token(Token::T_UNDERSCORE, $value, $this->line, $start, $end);
 
         }
 
-        throw new Exception('Unknown tokenization error');
+        throw new SyntaxError($this->line, 'Unknown tokenization error');
     }
 
     /**
@@ -421,7 +431,7 @@ LEX;
 
         $found = preg_match($this->regexp, $this->data, $matches, null, $this->inner_pos);
         if ($found !== 1) {
-            throw new Exception('Unknown token encountered');
+            throw new SyntaxError($this->line, 'Unknown token encountered');
         }
 
         for ($i = 1; '' === $matches[$i]; ++$i);
@@ -443,7 +453,7 @@ LEX;
         $lastWasStar = false;
         while (true) {
             if ($this->inner_pos === strlen($this->data)) {
-                throw new Exception('Unterminated comment');
+                throw new SyntaxError($this->line, 'Unterminated comment');
             }
 
             $next = $this->data[$this->inner_pos++];
@@ -486,7 +496,7 @@ LEX;
                     $buffer .= $value;
 
                 case 4: // $
-                    throw new Exception('Unterminated comment');
+                    throw new SyntaxError($this->line, 'Unterminated comment');
 
             }
 
@@ -528,7 +538,7 @@ LEX;
 
         while (true) {
             if ($this->inner_pos === strlen($this->data)) {
-                throw new Exception('Unterminated string');
+                throw new SyntaxError($this->line, 'Unterminated string');
             }
 
             $next = $this->data[$this->inner_pos++];
@@ -572,7 +582,7 @@ LEX;
         }
 
         if ($result !== 1) {
-            throw new Exception('Invalid doc string syntax');
+            throw new SyntaxError($this->line, 'Invalid doc string syntax');
         }
 
         $name = $match[0];
@@ -583,9 +593,9 @@ LEX;
         while (true) {
             if ($this->inner_pos === strlen($this->data)) {
                 if ($is_nowdoc) {
-                    throw new Exception('Unterminated nowdoc');
+                    throw new SyntaxError($this->line, 'Unterminated nowdoc');
                 } else {
-                    throw new Exception('Unterminated heredoc');
+                    throw new SyntaxError($this->line, 'Unterminated heredoc');
                 }
             }
 
@@ -631,7 +641,7 @@ LEX;
 
         while (true) {
             if ($this->inner_pos === strlen($this->data)) {
-                throw new Exception('Unterminated double-quoted string');
+                throw new SyntaxError($this->line, 'Unterminated double-quoted string');
             }
 
             $next = $this->data[$this->inner_pos++];
@@ -703,6 +713,82 @@ LEX;
         // TODO: Implement unicode escapes
 
         return '\\' . $code;
+    }
+
+    /**
+     * @param string $firstMatch The first part of an XHP structure
+     * @param int $start The start index of the first match
+     * @return void
+     */
+    private function queueXHP($firstMatch, $start)
+    {
+        // We need to keep a separate queue which gets merged into the main
+        // queue at the end. Otherwise, we couldn't use getNext because it
+        // would return tokens in the wrong order.
+        $queue = [];
+
+        $queue[] = new Token(
+            Token::T_XHP_NAME,
+            $firstMatch,
+            $this->line,
+            $start,
+            $this->inner_pos
+        );
+
+        $name = substr($firstMatch, 1);
+
+        // Push everything up until the first `>` to the queue
+        do {
+            $next = $this->getNext();
+            $queue[] = $next;
+        } while ($next->type !== Token::T_GT);
+
+        // If this is a self-closing XHP tag, we can exit now.
+        if ($queue[count($queue) - 2]->type === Token::T_SLASH) {
+            $this->mergeQueue($queue);
+            return;
+        }
+
+        while (true) {
+            $next = $this->getNext();
+            $queue[] = $next;
+
+            if ($next->type === Token::T_SLASH && $queue[count($queue) - 2]->type === Token::T_LT) {
+
+                // Pop off the last two
+                $slash = array_pop($queue);
+                $bracket = array_pop($queue);
+
+                $nameBuffer = '';
+                do {
+                    $next = $this->getNext();
+                    if ($next->type !== Token::T_GT) $nameBuffer .= $next->value;
+                } while ($next->type !== Token::T_GT);
+
+                $queue[] = new Token(
+                    Token::T_XHP_CLOSING,
+                    $nameBuffer,
+                    $this->line,
+                    $slash->start,
+                    $next->end
+                );
+
+                break;
+            }
+        }
+
+        $this->mergeQueue($queue);
+    }
+
+    /**
+     * @param Token[] $queue
+     * @return void
+     */
+    private function mergeQueue($queue)
+    {
+        foreach ($queue as $item) {
+            $this->queue[] = $item;
+        }
     }
 
     /**

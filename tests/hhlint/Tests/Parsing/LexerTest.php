@@ -18,6 +18,8 @@ $data = <<<'DATA'
  *
  */
 
+$xhp = <foo><bar /> <zip><zap asdf="ghjkl" /></zip></foo>;
+
 echo <<<TEST
 {$foo["x
 TEST;"]}";
@@ -56,3 +58,6 @@ $x = new Lexer($data);
 while ($tok = $x->getNext()) {
     echo $tok->value, "\n";
 }
+
+$foo = 'foo';
+echo $foo[-1];

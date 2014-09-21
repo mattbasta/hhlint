@@ -3,7 +3,7 @@
 namespace hhlint\Parsing;
 
 
-class HHSyntaxError extends \Exception
+class SyntaxError extends \Exception
 {
     protected $line = 0;
     protected $message = null;
