@@ -147,6 +147,9 @@ class Token
 
     const T_XHP_NAME = 137;
     const T_XHP_CLOSING = 138;
+    const T_XHP_COMMENT = 139;
+
+    private static $mapping = array();
 
 
     public $type;
@@ -163,4 +166,23 @@ class Token
         $this->start = $start;
         $this->end = $end;
     }
+
+    /**
+     * @return array A lookup table for token names
+     */
+    public static function getMapping()
+    {
+        if (self::$mapping) {
+            return clone self::$mapping;
+        }
+
+        $reflector = new \ReflectionClass('hhlint\\Parsing\\Token');
+        $results = $reflector->getConstants();
+
+        $results = \array_flip($results);
+
+        self::$mapping = $results;
+        return $results;
+    }
+
 }

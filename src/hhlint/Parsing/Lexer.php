@@ -39,19 +39,15 @@ class Lexer
     {
         $symbols = [];
 
-        $digit = $symbols['digit'] = '[0-9]';
-        $letter = $symbols['letter'] = '[a-zA-Z_]';
-        $alphanumeric = $symbols['alphanumeric'] = '(?:' . $digit . '|' . $letter . ')';
-        $varname = $symbols['varname'] = $letter . $alphanumeric . '*';
-        $word_part = $symbols['word_part'] = \sprintf("(?:%s%s*)|(?:[a-z](?:%s|-)*%s)", $letter, $alphanumeric, $alphanumeric, $alphanumeric);
+        $digit = '[0-9]';
+        $letter = '[a-zA-Z_]';
+        $alphanumeric = '(?:' . $digit . '|' . $letter . ')';
+        $varname = $letter . $alphanumeric . '*';
+        $word_part = \sprintf("(?:%s%s*)|(?:[a-z](?:%s|-)*%s)", $letter, $alphanumeric, $alphanumeric, $alphanumeric);
         $symbols['word'] = \sprintf("(?:\\\\|%s)+", $word_part);
         $symbols['xhpname'] = \sprintf("%%?%s(?:%s|:(?:%s|-)|-)*", $letter, $alphanumeric, $letter);
-        $symbols['otag'] = \sprintf("<[a-zA-Z](?:%s|:|-)*", $alphanumeric);
-        $symbols['ctag'] = \sprintf("</(?:%s|:|-)+>", $alphanumeric);
         $symbols['lvar'] = '\\$' . $varname;
-        $symbols['reflvar'] = '&\\$' . $varname;
         $ws = $symbols['ws'] = '[ \\t\\r\\x0c]';
-        $symbols['wsnl'] = '[ \\t\\r\\x0c\\n]';
 
         $hex_number = '0x(?:' . $digit . '|[a-fA-F])+';
         $bin_number = '0b[01]+';
@@ -167,10 +163,10 @@ LEX;
     public function getNext()
     {
         if ($this->queue) {
-            return array_shift($this->queue);
+            return \array_shift($this->queue);
         }
 
-        if ($this->inner_pos === strlen($this->data)) {
+        if ($this->inner_pos === \strlen($this->data)) {
             return null;
         }
 
@@ -753,11 +749,53 @@ LEX;
             $next = $this->getNext();
             $queue[] = $next;
 
+            $queueCount = count($queue);
+            // Deal with comments
+            if ($queueCount > 3 &&
+                $next->type === Token::T_DECR &&
+                $queue[$queueCount - 2]->type === Token::T_EM &&
+                $queue[$queueCount - 3]->type === Token::T_LT) {
+
+                \array_pop($queue); // Second hyphen
+                \array_pop($queue); // First hyphen
+                \array_pop($queue); // Bang
+                $commentStart = \array_pop($queue); // Bang
+
+                $commentBuffer = '';
+
+                $state = 0;
+                while (true) {
+                    $char = $this->data[$this->inner_pos++];
+                    if ($state < 2 && $char === '-') {
+                        $state++;
+                    } elseif ($state === 2 && $char === '>') {
+                        break;
+                    } else {
+                        $state = 0;
+                    }
+                    $commentBuffer .= $char;
+                    if ($char === "\n") {
+                        $this->line++;
+                    }
+                }
+                $commentBuffer = substr($commentBuffer, 0, strlen($commentBuffer) - 2);
+
+                $queue[] = new Token(
+                    Token::T_XHP_COMMENT,
+                    $commentBuffer,
+                    $this->line,
+                    $commentStart->start,
+                    $this->inner_pos
+                );
+
+                continue;
+            }
+
             if ($next->type === Token::T_SLASH && $queue[count($queue) - 2]->type === Token::T_LT) {
 
                 // Pop off the last two
-                $slash = array_pop($queue);
-                $bracket = array_pop($queue);
+                $slash = \array_pop($queue);
+                $bracket = \array_pop($queue);
 
                 $nameBuffer = '';
                 do {

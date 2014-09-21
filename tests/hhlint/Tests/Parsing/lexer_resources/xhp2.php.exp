@@ -1,0 +1,7 @@
+T_HH                            '<?hh'                          0, 4
+T_LVAR                          '$xhp'                          6, 10
+T_EQ                            '='                             11, 12
+T_XHP_NAME                      '<foo'                          13, 17
+T_XHP_COMMENT                   ' </foo> '                      17, 34
+T_XHP_CLOSING                   'foo'                           36, 41
+T_SC                            ';'                             41, 42
