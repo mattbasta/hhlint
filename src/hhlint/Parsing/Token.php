@@ -1,11 +1,12 @@
 <?php
 
+namespace hhlint\Parsing;
 
 class Token
 {
     const T_UNSAFE_EXPR = 0;
     const T_FIXME_EXPR = 1;
-    const T_DOUBLE_QUOTE = 2;
+    const T_DOUBLE_QUOTED_STRING = 2;
     const T_QUOTED_STRING = 3;
     const T_HEREDOC = 4;
     const T_INT = 5;

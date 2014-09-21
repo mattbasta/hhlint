@@ -1,6 +1,6 @@
 <?php
 
-require 'token.php';
+namespace hhlint\Parsing;
 
 
 class Lexer
@@ -44,11 +44,11 @@ class Lexer
         $letter = $symbols['letter'] = '[a-zA-Z_]';
         $alphanumeric = $symbols['alphanumeric'] = '(?:' . $digit . '|' . $letter . ')';
         $varname = $symbols['varname'] = $letter . $alphanumeric . '*';
-        $word_part = $symbols['word_part'] = sprintf("(?:%s%s*)|(?:[a-z](?:%s|-)*%s)", $letter, $alphanumeric, $alphanumeric, $alphanumeric);
-        $symbols['word'] = sprintf("(?:\\\\|%s)+", $word_part);
-        $symbols['xhpname'] = sprintf("%%?%s(?:%s|:[^:>]|-)*", $letter, $alphanumeric);
-        $symbols['otag'] = sprintf("<[a-zA-Z](?:%s|:|-)*", $alphanumeric);
-        $symbols['ctag'] = sprintf("</(?:%s|:|-)+>", $alphanumeric);
+        $word_part = $symbols['word_part'] = \sprintf("(?:%s%s*)|(?:[a-z](?:%s|-)*%s)", $letter, $alphanumeric, $alphanumeric, $alphanumeric);
+        $symbols['word'] = \sprintf("(?:\\\\|%s)+", $word_part);
+        $symbols['xhpname'] = \sprintf("%%?%s(?:%s|:[^:>]|-)*", $letter, $alphanumeric);
+        $symbols['otag'] = \sprintf("<[a-zA-Z](?:%s|:|-)*", $alphanumeric);
+        $symbols['ctag'] = \sprintf("</(?:%s|:|-)+>", $alphanumeric);
         $symbols['lvar'] = '\\$' . $varname;
         $symbols['reflvar'] = '&\\$' . $varname;
         $ws = $symbols['ws'] = '[ \\t\\r\\x0c]';
@@ -58,8 +58,8 @@ class Lexer
         $bin_number = '0b[01]+';
         $decimal_number = '0|[1-9]' . $digit . '*';
         $octal_number = '0[0-7]+';
-        $symbols['int'] = sprintf('%s|%s|%s|%s', $decimal_number, $hex_number, $bin_number, $octal_number);
-        $symbols['float'] = sprintf('(?:%s*(?:\.%s+)(?:[eE](?:\+?|-)%s+)?)|(?:%s+(?:\.%s*)(?:[eE](?:\+?|-)%s+)?)|(?:%s+[eE](?:\+?|-)%s+)', $digit, $digit, $digit, $digit, $digit, $digit, $digit, $digit);
+        $symbols['int'] = \sprintf('%s|%s|%s|%s', $decimal_number, $hex_number, $bin_number, $octal_number);
+        $symbols['float'] = \sprintf('(?:%s*(?:\.%s+)(?:[eE](?:\+?|-)%s+)?)|(?:%s+(?:\.%s*)(?:[eE](?:\+?|-)%s+)?)|(?:%s+[eE](?:\+?|-)%s+)', $digit, $digit, $digit, $digit, $digit, $digit, $digit, $digit);
         $symbols['unsafe'] = '//' . $ws . '*UNSAFE[^\\n]*';
         $symbols['unsafeexpr_start'] = '//' . $ws . '*UNSAFE_EXPR';
         $symbols['fixme_start'] = '/\*' . $ws . '*HH_FIXME';
@@ -200,8 +200,9 @@ LEX;
                 $comment_list[] = array($comment, $start, $this->inner_pos);
                 return $this->getNext();
 
-            case 8: // "
-                return new Token(Token::T_DOUBLE_QUOTE, $value, $this->line, $start, $end);
+            case 8: // "string"
+                $data = $this->getDoubleQuotedString();
+                return new Token(Token::T_DOUBLE_QUOTED_STRING, $data, $this->line, $start, $end);
 
             case 9: // 'string'
                 $data = $this->getSingleQuotedString();
@@ -597,13 +598,13 @@ LEX;
                     $this->line++;
                 }
                 continue;
-            }
-
-            if ($next === "\n") {
+            } elseif ($next === '{') {
+                $next .= $this->eatComplexString();
+            } elseif ($next === "\n") {
                 $this->line++;
 
-                if (substr($this->data, $this->inner_pos, $namelen + 1) === $name . ';') {
-                    $this->inner_pos += $namelen + 1;
+                if (substr($this->data, $this->inner_pos, $namelen) === $name) {
+                    $this->inner_pos += $namelen;
                     break;
                 }
             }
@@ -618,6 +619,66 @@ LEX;
             return new Token(Token::T_HEREDOC, $buffer, $this->line, $start, $end);
         }
 
+    }
+
+    /**
+     * @return string
+     */
+    private function getDoubleQuotedString()
+    {
+        $buffer = '';
+
+        while (true) {
+            if ($this->inner_pos === strlen($this->data)) {
+                throw new Exception('Unterminated double-quoted string');
+            }
+
+            $next = $this->data[$this->inner_pos++];
+
+            if ($next === '\\') {
+                $peek = $this->data[++$this->inner_pos];
+                $unescaped = $this->getEscape($peek);
+                $buffer .= $unescaped;
+                if ($unescaped === "\n") {
+                    $this->line++;
+                }
+                continue;
+            } elseif ($next === '{') {
+                $next .= $this->eatComplexString();
+            } elseif ($next === "\n") {
+                $this->line++;
+            } elseif ($next === '"') {
+                return $buffer;
+            }
+
+            $buffer .= $next;
+
+        }
+
+    }
+
+    /**
+     * Consumes a balanced number of curly braces (assuming the opening curly
+     * brace has already been consumed) ignoring all types of expressions.
+     * @return string
+     */
+    private function eatComplexString()
+    {
+        $buffer = '';
+        $braces = 0;
+        while (true) {
+            $token = $this->getNext();
+            $buffer .= $token->value;
+
+            if ($token->type === Token::T_LCB) {
+                $braces++;
+            } elseif ($token->type === Token::T_RCB) {
+                $braces--;
+                if ($braces === -1) {
+                    return $buffer;
+                }
+            }
+        }
     }
 
     /**
